@@ -112,6 +112,9 @@ export class SessionManager {
             vessel_labeled: false,
         };
 
+        // Warning timer tracking
+        this._warningTimeout = null;
+
         // Admin state
         this._adminAuthenticated = false;
         this._adminAttempts = 0;
@@ -177,7 +180,7 @@ export class SessionManager {
         if (hepaEl) {
             if (!this.D3.hepa_blower_active) hepaEl.textContent = '—';
             else if (this.D2.blower_purge_completed) hepaEl.textContent = 'Stabilized ✓';
-            else hepaEl.textContent = `Purging... ${Math.ceil(this.D1.blower_purge_delay_sim - this.D3.blower_purge_elapsed)}s`;
+            else hepaEl.textContent = `Purging... ${Math.max(0, Math.ceil(this.D1.blower_purge_delay_sim - this.D3.blower_purge_elapsed))}s`;
         }
         if (sashEl) {
             const h = this.D3.sash_height;
@@ -204,8 +207,16 @@ export class SessionManager {
         this.showWarning('[HZ-001] Aseptic Flow Disrupted: Clear Intake Grille');
     }
 
-    clearWarning() {
+    clearGrilleViolation() {
         this.D3.air_curtain_integrity = true;
+        this.clearWarning();
+    }
+
+    clearWarning() {
+        if (this._warningTimeout) {
+            clearTimeout(this._warningTimeout);
+            this._warningTimeout = null;
+        }
         if (typeof document === 'undefined') return;
         const banner = document.getElementById('warning-banner');
         if (banner) {
@@ -215,6 +226,10 @@ export class SessionManager {
     }
 
     showWarning(text, severe = false) {
+        if (this._warningTimeout) {
+            clearTimeout(this._warningTimeout);
+            this._warningTimeout = null;
+        }
         if (typeof document === 'undefined') return;
         const banner = document.getElementById('warning-banner');
         const textEl = document.getElementById('warning-text');
@@ -231,7 +246,7 @@ export class SessionManager {
         this.D2.sidewall_violations++;
         this.D2.technique_score = Math.max(0, this.D2.technique_score - 10);
         this.showWarning('Procedural Penalty: High Fluid Shear Damage to Monolayer (Perpendicular Dispense)');
-        setTimeout(() => this.clearWarning(), 4000);
+        this._warningTimeout = setTimeout(() => this.clearWarning(), 4000);
     }
 
     // ——— Overexposure [HZ-003] ———
@@ -248,21 +263,22 @@ export class SessionManager {
     // ——— Timer display ———
     showTimer(label, seconds) {
         if (typeof document === 'undefined') return;
+        const safeSeconds = Math.max(0, Number(seconds) || 0);
         const readout = document.getElementById('timer-readout');
         const labelEl = document.getElementById('timer-label');
         const valEl = document.getElementById('timer-value');
 
         if (readout) readout.classList.remove('hidden');
         if (labelEl) labelEl.textContent = label;
-        const min = Math.floor(seconds / 60);
-        const sec = Math.floor(seconds % 60);
+        const min = Math.floor(safeSeconds / 60);
+        const sec = Math.floor(safeSeconds % 60);
         if (valEl) {
             valEl.textContent = `${min.toString().padStart(2, '0')}:${sec.toString().padStart(2, '0')}`;
         }
 
         // Critical state if trypsin > 5 min
         if (readout) {
-            if (label.includes('Trypsin') && seconds > 300) {
+            if (label.includes('Trypsin') && safeSeconds > 300) {
                 readout.classList.add('critical');
             } else {
                 readout.classList.remove('critical');
@@ -359,7 +375,7 @@ export class SessionManager {
                     this.D1.ground_truth_cell_density = v;
                 } else {
                     this.showWarning('Parameter out of range: density must be 1.0×10⁵ to 5.0×10⁶');
-                    setTimeout(() => this.clearWarning(), 3000);
+                    this._warningTimeout = setTimeout(() => this.clearWarning(), 3000);
                     densInput.value = this.D1.ground_truth_cell_density;
                 }
             };
@@ -370,7 +386,8 @@ export class SessionManager {
         if (typeof document === 'undefined') return;
         const el = document.getElementById('admin-logs');
         if (!el) return;
-        const allLogs = [...this._sessionArchive, this.D2];
+        const isCurrentArchived = this._sessionArchive.some(s => s.session_id === this.D2.session_id);
+        const allLogs = isCurrentArchived ? [...this._sessionArchive] : [...this._sessionArchive, this.D2];
         if (allLogs.length === 0) {
             el.textContent = 'No session logs available.';
         } else {
@@ -386,8 +403,10 @@ export class SessionManager {
         const a = document.createElement('a');
         a.href = url;
         a.download = `session_${this.D2.session_id}.json`;
+        document.body.appendChild(a);
         a.click();
-        URL.revokeObjectURL(url);
+        document.body.removeChild(a);
+        setTimeout(() => URL.revokeObjectURL(url), 1000);
     }
 
     finalizeSession() {
@@ -410,13 +429,20 @@ export class SessionManager {
     }
 
     // ——— Calculation results modal ———
-    showCalcModal(title, bodyHTML) {
+    showCalcModal(title, bodyHTML, onOk) {
         if (typeof document === 'undefined') return;
         const titleEl = document.getElementById('calc-modal-title');
         const bodyEl = document.getElementById('calc-modal-body');
         const modal = document.getElementById('calculation-modal');
+        const okBtn = document.getElementById('calc-modal-ok');
         if (titleEl) titleEl.textContent = title;
         if (bodyEl) bodyEl.innerHTML = bodyHTML;
         if (modal) modal.classList.remove('hidden');
+        if (okBtn) {
+            okBtn.onclick = () => {
+                if (modal) modal.classList.add('hidden');
+                if (typeof onOk === 'function') onOk();
+            };
+        }
     }
 }

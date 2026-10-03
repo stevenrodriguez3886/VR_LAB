@@ -309,16 +309,33 @@ document.getElementById('audit-restart').addEventListener('click', () => {
 
 // Confirm modal buttons
 document.getElementById('confirm-yes').addEventListener('click', () => {
-    const cb = document.getElementById('confirm-modal')._onConfirm;
-    document.getElementById('confirm-modal').classList.add('hidden');
-    if (cb) cb();
-    else controls.lock();
+    const modal = document.getElementById('confirm-modal');
+    const cb = modal ? modal._onConfirm : null;
+    if (modal) {
+        modal.classList.add('hidden');
+        modal._onConfirm = null;
+        modal._onCancel = null;
+    }
+    if (typeof cb === 'function') cb();
+    if (!isAnyModalOpen()) controls.lock();
 });
 document.getElementById('confirm-no').addEventListener('click', () => {
-    const cb = document.getElementById('confirm-modal')._onCancel;
-    document.getElementById('confirm-modal').classList.add('hidden');
-    if (cb) cb();
-    else controls.lock();
+    const modal = document.getElementById('confirm-modal');
+    const cb = modal ? modal._onCancel : null;
+    if (modal) {
+        modal.classList.add('hidden');
+        modal._onConfirm = null;
+        modal._onCancel = null;
+    }
+    if (typeof cb === 'function') cb();
+    if (!isAnyModalOpen()) controls.lock();
+});
+
+// Calculation modal OK button
+document.getElementById('calc-modal-ok').addEventListener('click', () => {
+    const modal = document.getElementById('calculation-modal');
+    if (modal) modal.classList.add('hidden');
+    if (!isAnyModalOpen()) controls.lock();
 });
 
 // Objective buttons
