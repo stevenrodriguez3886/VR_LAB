@@ -47,14 +47,7 @@ const ceilingLight2 = new THREE.PointLight(0xe0f0ff, 0.5, 15);
 ceilingLight2.position.set(3, 3.8, 0);
 scene.add(ceilingLight2);
 
-// Floor plane & grid helper for immediate spatial orientation
-const floorGeometry = new THREE.PlaneGeometry(12, 20);
-const floorMaterial = new THREE.MeshStandardMaterial({ color: 0x222233, roughness: 0.8 });
-const floor = new THREE.Mesh(floorGeometry, floorMaterial);
-floor.rotation.x = -Math.PI / 2;
-floor.receiveShadow = true;
-scene.add(floor);
-
+// Grid helper for subtle ground orientation
 const gridHelper = new THREE.GridHelper(20, 20, 0x4fc3f7, 0x334455);
 gridHelper.position.y = 0.01;
 scene.add(gridHelper);

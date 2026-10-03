@@ -34,7 +34,7 @@ export function createLabEnvironment(scene, sessionManager) {
 
     // ——— Room Geometry ———
     // Main Lab Room: 12m wide × 20m deep × 4m tall, centered at origin
-    // Anteroom is at the back (z > 4), main lab is at front (z < 4)
+    // Anteroom is at the back (z > 4), main cleanroom is at front (z < 4)
 
     // Floor
     const floor = new THREE.Mesh(
@@ -69,17 +69,24 @@ export function createLabEnvironment(scene, sessionManager) {
     makeWall(20, 4, -6, 2, 0, Math.PI / 2);  // Left wall
     makeWall(20, 4, 6, 2, 0, -Math.PI / 2);  // Right wall
 
-    // Divider wall between anteroom and main lab (with door gap)
-    makeWall(4, 4, -4, 2, 4, Math.PI);
-    makeWall(4, 4, 4, 2, 4, Math.PI);
-    makeWall(4, 4, -4, 2, 4, 0);
-    makeWall(4, 4, 4, 2, 4, 0);
-    makeWall(4, 1, 0, 3.5, 4, Math.PI);
-    makeWall(4, 1, 0, 3.5, 4, 0);
+    // Divider wall between anteroom and main cleanroom (at z = 4)
+    // Left section (5m wide, centered at x = -3.5, spans x = -6 to -1)
+    makeWall(5, 4, -3.5, 2, 4, Math.PI);
+    makeWall(5, 4, -3.5, 2, 4, 0);
+    // Right section (5m wide, centered at x = 3.5, spans x = 1 to 6)
+    makeWall(5, 4, 3.5, 2, 4, Math.PI);
+    makeWall(5, 4, 3.5, 2, 4, 0);
+    // Header above doorway (2m wide, centered at x = 0, y from 3 to 4)
+    makeWall(2, 1, 0, 3.5, 4, Math.PI);
+    makeWall(2, 1, 0, 3.5, 4, 0);
 
-    // Lab Workbench for reagents and equipment
-    const bench = new THREE.Mesh(new THREE.BoxGeometry(4.5, 1.5, 1.8), materials.metal);
-    bench.position.set(1.0, 0.75, -2.5);
+    // Main Laboratory Workbench (non-overlapping with BSC)
+    // BSC is at x = -2 (width 2.4, spanning x = -3.2 to -0.8).
+    // Workbench is placed at x = 1.6m (width 3.6, spanning x = -0.2 to +3.4),
+    // providing a clean 0.6m aisle clearance.
+    // Height is 1.5m, centered at y = 0.75, so tabletop surface rests at y = 1.50m.
+    const bench = new THREE.Mesh(new THREE.BoxGeometry(3.6, 1.5, 1.6), materials.metal);
+    bench.position.set(1.6, 0.75, -2.5);
     bench.castShadow = true;
     bench.receiveShadow = true;
     scene.add(bench);
@@ -154,7 +161,8 @@ export function createLabEnvironment(scene, sessionManager) {
     bscGroup.position.set(-2, 0, -2);
 
     const bscBody = new THREE.Mesh(new THREE.BoxGeometry(2.4, 1.5, 1.0), materials.metal);
-    bscBody.position.y = 0.75; bscBody.castShadow = true;
+    bscBody.position.y = 0.75;
+    bscBody.castShadow = true;
     bscGroup.add(bscBody);
 
     const bscUpper = new THREE.Mesh(new THREE.BoxGeometry(2.4, 0.6, 1.0), materials.metal);
@@ -162,7 +170,8 @@ export function createLabEnvironment(scene, sessionManager) {
     bscGroup.add(bscUpper);
 
     const workSurface = new THREE.Mesh(new THREE.BoxGeometry(2.2, 0.05, 0.8), materials.surface_dirty);
-    workSurface.position.set(0, 1.52, 0); workSurface.receiveShadow = true;
+    workSurface.position.set(0, 1.525, 0); // surface at y = 1.55m
+    workSurface.receiveShadow = true;
     bscGroup.add(workSurface);
     labObjects.workSurface = workSurface;
 
@@ -216,9 +225,12 @@ export function createLabEnvironment(scene, sessionManager) {
     labObjects.blowerSwitch = blowerSwitch;
 
     // ——— Glass Sash Interaction [FR-003] ———
+    // Sash travel delta is 20cm (0.2m): closed at y = 1.9, open at y = 2.1.
+    // The handle moves synchronously with the glass sash.
     const sashInteract = new THREE.Group();
-    sashInteract.position.set(-2, 2.1, -2 + 0.5);
+    sashInteract.position.set(-2, 1.9, -2 + 0.5);
     const sashHandle = new THREE.Mesh(new THREE.BoxGeometry(0.5, 0.05, 0.05), materials.plastic_blue);
+    sashHandle.position.y = 0.025; // height / 2
     sashInteract.add(sashHandle);
     sashInteract.userData = {
         interactable: true,
@@ -228,11 +240,13 @@ export function createLabEnvironment(scene, sessionManager) {
             const sm = ctx.sessionManager;
             if (sm.D3.sash_height < 19.0) {
                 sm.D3.sash_height = 20.0;
-                sashGlass.position.y = 2.3;
+                sashGlass.position.y = 2.1;
+                sashInteract.position.y = 2.1;
                 obj.userData.tooltipText = 'Sash at 20.0 cm ✓';
             } else {
                 sm.D3.sash_height = 0.0;
                 sashGlass.position.y = 1.9;
+                sashInteract.position.y = 1.9;
                 obj.userData.tooltipText = 'Glass Sash — Click to raise';
             }
             sm.D2.sash_compliance = (sm.D3.sash_height >= 19.0 && sm.D3.sash_height <= 21.0);
@@ -243,13 +257,15 @@ export function createLabEnvironment(scene, sessionManager) {
     interactables.push(sashInteract);
     labObjects.sashInteract = sashInteract;
 
-    // ——— Ethanol Spray Bottle [FR-004] ———
+    // ——— 70% Ethanol Spray Bottle [FR-004] ———
+    // Resting flush on workbench corner near the BSC
     const ethanolBottle = new THREE.Group();
-    ethanolBottle.position.set(-0.5, 1.55, -2);
+    ethanolBottle.position.set(-0.1, 1.50, -1.9);
     const bottleBody = new THREE.Mesh(new THREE.CylinderGeometry(0.04, 0.05, 0.2, 12), materials.ethanol_bottle);
+    bottleBody.position.y = 0.10; // height / 2
     ethanolBottle.add(bottleBody);
     const sprayHead = new THREE.Mesh(new THREE.BoxGeometry(0.06, 0.04, 0.08), materials.plastic_white);
-    sprayHead.position.y = 0.12;
+    sprayHead.position.set(0, 0.22, 0); // 0.20 + 0.04 / 2
     ethanolBottle.add(sprayHead);
     ethanolBottle.userData = {
         interactable: true,
@@ -272,9 +288,11 @@ export function createLabEnvironment(scene, sessionManager) {
     labObjects.ethanolBottle = ethanolBottle;
 
     // ——— Supply Shelf / Apparatus Staging [FR-005] ———
+    // Resting flush on workbench
     const supplyShelf = new THREE.Group();
-    supplyShelf.position.set(2, 1.55, -2);
+    supplyShelf.position.set(2.8, 1.50, -2.0);
     const tipBox = new THREE.Mesh(new THREE.BoxGeometry(0.15, 0.08, 0.15), materials.plastic_blue);
+    tipBox.position.y = 0.04; // height / 2
     supplyShelf.add(tipBox);
     supplyShelf.userData = {
         interactable: true,
@@ -285,7 +303,7 @@ export function createLabEnvironment(scene, sessionManager) {
             if (ctx.stateMachine.getCurrentState() < States.CABINET_SETUP) return;
             sm.D3.apparatus_staged = true;
             obj.userData.tooltipText = 'Apparatus staged in BSC ✓';
-            supplyShelf.position.set(-2, 1.58, -2.2);
+            supplyShelf.position.set(-2, 1.55, -2.2);
             sm.updateBSCDisplay();
         }
     };
@@ -294,9 +312,11 @@ export function createLabEnvironment(scene, sessionManager) {
     labObjects.supplyShelf = supplyShelf;
 
     // ——— Grille Hazard Test Object [HZ-001] ———
+    // Docked on workbench surface at z = -2.0 (flush at y = 1.50)
     const testObject = new THREE.Group();
-    testObject.position.set(0.5, 1.55, -1);
+    testObject.position.set(0.4, 1.50, -2.0);
     const testMesh = new THREE.Mesh(new THREE.BoxGeometry(0.2, 0.15, 0.2), materials.reagent_bottle);
+    testMesh.position.y = 0.075; // height / 2
     testObject.add(testMesh);
     testObject.userData = {
         interactable: true,
@@ -309,12 +329,12 @@ export function createLabEnvironment(scene, sessionManager) {
             if (!obj.userData.inBSC) {
                 obj.userData.inBSC = true;
                 obj.userData.nearGrille = true;
-                testObject.position.set(-2, 1.58, -2 + 0.4);
+                testObject.position.set(-2, 1.55, -2 + 0.4);
                 sm.logGrilleViolation();
                 obj.userData.tooltipText = 'Media Bottle — ⚠ Too close to grille! Click to reposition';
             } else if (obj.userData.nearGrille) {
                 obj.userData.nearGrille = false;
-                testObject.position.set(-2, 1.58, -2.3);
+                testObject.position.set(-2, 1.55, -2.3);
                 sm.clearWarning();
                 obj.userData.tooltipText = 'Media Bottle — Positioned safely ✓';
             }
@@ -328,7 +348,8 @@ export function createLabEnvironment(scene, sessionManager) {
     const microscopeGroup = new THREE.Group();
     microscopeGroup.position.set(3, 0, 0);
     const microBase = new THREE.Mesh(new THREE.BoxGeometry(0.5, 0.8, 0.4), materials.metal);
-    microBase.position.y = 0.4; microBase.castShadow = true;
+    microBase.position.y = 0.4;
+    microBase.castShadow = true;
     microscopeGroup.add(microBase);
     const microArm = new THREE.Mesh(new THREE.BoxGeometry(0.1, 0.8, 0.1), materials.metal);
     microArm.position.set(0, 1.2, -0.1);
@@ -337,10 +358,12 @@ export function createLabEnvironment(scene, sessionManager) {
     microHead.position.set(0, 1.6, 0);
     microscopeGroup.add(microHead);
     const eyepiece1 = new THREE.Mesh(new THREE.CylinderGeometry(0.03, 0.03, 0.12, 8), materials.plastic_white);
-    eyepiece1.position.set(-0.06, 1.73, 0); eyepiece1.rotation.x = -0.3;
+    eyepiece1.position.set(-0.06, 1.73, 0);
+    eyepiece1.rotation.x = -0.3;
     microscopeGroup.add(eyepiece1);
     const eyepiece2 = new THREE.Mesh(new THREE.CylinderGeometry(0.03, 0.03, 0.12, 8), materials.plastic_white);
-    eyepiece2.position.set(0.06, 1.73, 0); eyepiece2.rotation.x = -0.3;
+    eyepiece2.position.set(0.06, 1.73, 0);
+    eyepiece2.rotation.x = -0.3;
     microscopeGroup.add(eyepiece2);
     const microStage = new THREE.Mesh(new THREE.BoxGeometry(0.3, 0.02, 0.3), materials.metal);
     microStage.position.set(0, 0.85, 0.05);
@@ -360,8 +383,8 @@ export function createLabEnvironment(scene, sessionManager) {
             }
             if (state > States.INSPECTION) return;
             document.getElementById('microscope-modal').classList.remove('hidden');
-            ctx.controls.unlock();
-            ctx.biologyEngine.renderMicroscopeView();
+            ctx.controls?.unlock?.();
+            ctx.biologyEngine?.renderMicroscopeView?.();
         }
     };
     scene.add(microscopeGroup);
@@ -369,12 +392,14 @@ export function createLabEnvironment(scene, sessionManager) {
     labObjects.microscope = microscopeGroup;
 
     // ——— T-75 Culture Flask ———
+    // Sits flush inside BSC on the stainless work surface (y = 1.55)
     const flaskGroup = new THREE.Group();
     flaskGroup.position.set(-1.5, 1.55, -2);
     const flaskBody = new THREE.Mesh(new THREE.BoxGeometry(0.08, 0.18, 0.04), materials.flask);
+    flaskBody.position.y = 0.09; // height / 2
     flaskGroup.add(flaskBody);
     const flaskLiquid = new THREE.Mesh(new THREE.BoxGeometry(0.07, 0.08, 0.035), materials.liquid_yellow);
-    flaskLiquid.position.y = -0.04;
+    flaskLiquid.position.y = 0.045; // resting near flask bottom
     flaskGroup.add(flaskLiquid);
     labObjects.flaskLiquid = flaskLiquid;
 
@@ -389,14 +414,20 @@ export function createLabEnvironment(scene, sessionManager) {
     labObjects.flask = flaskGroup;
 
     // ——— Vacuum Aspiration System [FR-011] ———
+    // Realistic floor stand/cart next to BSC
     const vacuumGroup = new THREE.Group();
-    vacuumGroup.position.set(-3.5, 1.0, -2);
+    vacuumGroup.position.set(-3.5, 0, -2);
+    const vacuumCart = new THREE.Mesh(new THREE.BoxGeometry(0.35, 0.1, 0.35), materials.metal);
+    vacuumCart.position.y = 0.05;
+    vacuumGroup.add(vacuumCart);
     const vacuumBody = new THREE.Mesh(new THREE.CylinderGeometry(0.12, 0.12, 0.4, 12), materials.plastic_white);
+    vacuumBody.position.y = 0.30; // 0.10 cart + 0.20 canister half-height
     vacuumBody.castShadow = true;
     vacuumGroup.add(vacuumBody);
     const vacuumHose = new THREE.Mesh(new THREE.CylinderGeometry(0.015, 0.015, 0.5, 8),
         new THREE.MeshStandardMaterial({ color: 0x555555 }));
-    vacuumHose.position.set(0, 0.3, 0); vacuumHose.rotation.z = 0.4;
+    vacuumHose.position.set(0, 0.60, 0);
+    vacuumHose.rotation.z = 0.4;
     vacuumGroup.add(vacuumHose);
 
     vacuumGroup.userData = {
@@ -424,10 +455,12 @@ export function createLabEnvironment(scene, sessionManager) {
     labObjects.vacuum = vacuumGroup;
 
     // ——— PBS Bottle [FR-012] ———
+    // Flush on workbench at y = 1.50
     const pbsBottle = new THREE.Group();
-    pbsBottle.position.set(-1, 1.55, -3);
+    pbsBottle.position.set(0.1, 1.50, -2.8);
     const pbsBody = new THREE.Mesh(new THREE.CylinderGeometry(0.04, 0.05, 0.2, 12),
         new THREE.MeshStandardMaterial({ color: 0x90caf9, transparent: true, opacity: 0.6 }));
+    pbsBody.position.y = 0.10; // height / 2
     pbsBottle.add(pbsBody);
     pbsBottle.userData = {
         interactable: true,
@@ -453,10 +486,12 @@ export function createLabEnvironment(scene, sessionManager) {
     labObjects.pbsBottle = pbsBottle;
 
     // ——— Trypsin Bottle [FR-013] ———
+    // Flush on workbench at y = 1.50
     const trypsinBottle = new THREE.Group();
-    trypsinBottle.position.set(-0.5, 1.55, -3);
+    trypsinBottle.position.set(0.6, 1.50, -2.8);
     const trypBody = new THREE.Mesh(new THREE.CylinderGeometry(0.03, 0.04, 0.15, 12),
         new THREE.MeshStandardMaterial({ color: 0xffab91 }));
+    trypBody.position.y = 0.075; // height / 2
     trypsinBottle.add(trypBody);
     trypsinBottle.userData = {
         interactable: true,
@@ -477,7 +512,7 @@ export function createLabEnvironment(scene, sessionManager) {
                 sm.D3.trypsin_timer_running = true;
                 sm.D3.trypsin_timer_elapsed = 0;
                 obj.userData.tooltipText = 'Trypsin applied — timer started ✓';
-                ctx.biologyEngine.startTrypsinTimer();
+                ctx.biologyEngine?.startTrypsinTimer?.();
             }
         }
     };
@@ -486,9 +521,11 @@ export function createLabEnvironment(scene, sessionManager) {
     labObjects.trypsinBottle = trypsinBottle;
 
     // ——— DMEM Bottle (for quenching) [FR-015] ———
+    // Flush on workbench at y = 1.50
     const dmemBottle = new THREE.Group();
-    dmemBottle.position.set(0, 1.55, -3);
+    dmemBottle.position.set(1.1, 1.50, -2.8);
     const dmemBody = new THREE.Mesh(new THREE.CylinderGeometry(0.05, 0.06, 0.22, 12), materials.reagent_bottle);
+    dmemBody.position.y = 0.11; // height / 2
     dmemBottle.add(dmemBody);
     dmemBottle.userData = {
         interactable: true,
@@ -507,7 +544,7 @@ export function createLabEnvironment(scene, sessionManager) {
             sm.D3.trypsin_activity_state = 'Neutralized';
             sm.D3.trypsin_timer_running = false;
             sm.D3.medium_color_state = 'Red-Orange';
-            ctx.biologyEngine.stopTrypsinTimer();
+            ctx.biologyEngine?.stopTrypsinTimer?.();
             obj.userData.tooltipText = 'Trypsin neutralized ✓';
             sm.hideTimer();
             flaskLiquid.visible = true;
@@ -519,13 +556,15 @@ export function createLabEnvironment(scene, sessionManager) {
     labObjects.dmemBottle = dmemBottle;
 
     // ——— Microcentrifuge Tube & Trypan Blue [FR-017] ———
+    // Flush on workbench at y = 1.50
     const trypanGroup = new THREE.Group();
-    trypanGroup.position.set(1, 1.55, -2);
+    trypanGroup.position.set(1.6, 1.50, -2.0);
     const tubeBody = new THREE.Mesh(new THREE.CylinderGeometry(0.01, 0.005, 0.06, 8), materials.plastic_white);
+    tubeBody.position.y = 0.03; // height / 2
     trypanGroup.add(tubeBody);
     const trypanBottleM = new THREE.Mesh(new THREE.CylinderGeometry(0.02, 0.02, 0.08, 8),
         new THREE.MeshStandardMaterial({ color: 0x1565c0 }));
-    trypanBottleM.position.x = 0.06;
+    trypanBottleM.position.set(0.06, 0.04, 0); // height / 2
     trypanGroup.add(trypanBottleM);
     trypanGroup.userData = {
         interactable: true,
@@ -550,9 +589,11 @@ export function createLabEnvironment(scene, sessionManager) {
     labObjects.trypanGroup = trypanGroup;
 
     // ——— Hemocytometer [FR-018–019] ———
+    // Flush on workbench at y = 1.50
     const hemoGroup = new THREE.Group();
-    hemoGroup.position.set(1.5, 1.55, -2);
+    hemoGroup.position.set(2.1, 1.50, -2.0);
     const hemoSlide = new THREE.Mesh(new THREE.BoxGeometry(0.08, 0.005, 0.04), materials.glass);
+    hemoSlide.position.y = 0.0025; // height / 2
     hemoGroup.add(hemoSlide);
     hemoGroup.userData = {
         interactable: true,
@@ -567,8 +608,8 @@ export function createLabEnvironment(scene, sessionManager) {
             }
             sm.D3.hemocytometer_loaded = true;
             document.getElementById('hemocytometer-modal').classList.remove('hidden');
-            ctx.controls.unlock();
-            ctx.biologyEngine.renderHemocytometerGrid();
+            ctx.controls?.unlock?.();
+            ctx.biologyEngine?.renderHemocytometerGrid?.();
         }
     };
     scene.add(hemoGroup);
@@ -576,9 +617,11 @@ export function createLabEnvironment(scene, sessionManager) {
     labObjects.hemoGroup = hemoGroup;
 
     // ——— Destination Flask [FR-021–022] ———
+    // Flush on workbench at y = 1.50
     const destFlask = new THREE.Group();
-    destFlask.position.set(2, 1.55, -3);
+    destFlask.position.set(2.2, 1.50, -2.8);
     const destBody = new THREE.Mesh(new THREE.BoxGeometry(0.08, 0.18, 0.04), materials.flask);
+    destBody.position.y = 0.09; // height / 2
     destFlask.add(destBody);
     destFlask.userData = {
         interactable: true,
@@ -595,13 +638,13 @@ export function createLabEnvironment(scene, sessionManager) {
             if (!sm.D3.inoculation_volume_set) {
                 document.getElementById('inoc-c1').textContent = sm.D2.calculated_density.toExponential(2);
                 document.getElementById('inoculation-modal').classList.remove('hidden');
-                ctx.controls.unlock();
+                ctx.controls?.unlock?.();
             } else if (!sm.D3.vessel_labeled) {
                 const now = new Date();
                 document.getElementById('label-passage').value = 'P+1';
                 document.getElementById('label-date').value = now.toISOString().split('T')[0];
                 document.getElementById('label-modal').classList.remove('hidden');
-                ctx.controls.unlock();
+                ctx.controls?.unlock?.();
             }
         }
     };
@@ -610,9 +653,11 @@ export function createLabEnvironment(scene, sessionManager) {
     labObjects.destFlask = destFlask;
 
     // ——— Filter Cap Toggle [FR-023] ———
+    // Mounted directly on top of the destination flask (at neck level: y = 1.50 + 0.18)
     const capToggle = new THREE.Group();
-    capToggle.position.set(2.5, 1.55, -3);
+    capToggle.position.set(2.2, 1.68, -2.8);
     const capMesh = new THREE.Mesh(new THREE.CylinderGeometry(0.02, 0.02, 0.03, 8), materials.plastic_white);
+    capMesh.position.y = 0.015; // height / 2
     capToggle.add(capMesh);
     capToggle.userData = {
         interactable: true,
@@ -640,7 +685,8 @@ export function createLabEnvironment(scene, sessionManager) {
     const incubatorGroup = new THREE.Group();
     incubatorGroup.position.set(4, 0, -5);
     const incBody = new THREE.Mesh(new THREE.BoxGeometry(1.0, 1.8, 0.8), materials.incubator);
-    incBody.position.y = 0.9; incBody.castShadow = true;
+    incBody.position.y = 0.9;
+    incBody.castShadow = true;
     incubatorGroup.add(incBody);
     const incDoor = new THREE.Mesh(new THREE.BoxGeometry(0.9, 1.6, 0.05),
         new THREE.MeshStandardMaterial({ color: 0x455a64, metalness: 0.5, roughness: 0.4 }));
@@ -672,6 +718,17 @@ export function createLabEnvironment(scene, sessionManager) {
             }
             sm.D3.flask_in_incubator = true;
             obj.userData.tooltipText = 'Flask placed in incubator ✓';
+
+            // Hide destination flask & cap from workbench, docking them inside incubator chamber
+            if (labObjects.destFlask) {
+                labObjects.destFlask.position.set(4, 0.9, -5);
+                labObjects.destFlask.visible = false;
+            }
+            if (labObjects.capToggle) {
+                labObjects.capToggle.position.set(4, 1.08, -5);
+                labObjects.capToggle.visible = false;
+            }
+
             ctx.stateMachine.transition(States.COMPLETE);
         }
     };
