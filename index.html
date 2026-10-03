@@ -1,0 +1,196 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>VR Cell Culture Laboratory</title>
+    <link rel="stylesheet" href="style.css">
+</head>
+<body>
+    <!-- Click-to-start overlay -->
+    <div id="blocker">
+        <div id="instructions">
+            <h1>VR Cell Culture Laboratory</h1>
+            <p>Click to start</p>
+            <p class="sub">WASD to move &bull; Mouse to look &bull; E to interact &bull; ESC to pause</p>
+        </div>
+    </div>
+
+    <!-- HUD Overlay (always visible during gameplay) -->
+    <div id="hud" class="hidden">
+        <!-- Crosshair reticle -->
+        <div id="crosshair">+</div>
+
+        <!-- Top-center: current phase banner -->
+        <div id="phase-banner">Phase 0: Anteroom</div>
+
+        <!-- Top-right: timer readout -->
+        <div id="timer-readout" class="hidden">
+            <span id="timer-label">Timer:</span>
+            <span id="timer-value">00:00</span>
+        </div>
+
+        <!-- Bottom-left: PPE status -->
+        <div id="ppe-status">
+            <div class="ppe-item" data-ppe="gloves">🧤 Gloves: <span class="status-off">OFF</span></div>
+            <div class="ppe-item" data-ppe="coat">🥼 Lab Coat: <span class="status-off">OFF</span></div>
+            <div class="ppe-item" data-ppe="eyewear">🥽 Eye Protection: <span class="status-off">OFF</span></div>
+        </div>
+
+        <!-- Bottom-center: interaction tooltip -->
+        <div id="tooltip" class="hidden">Press E to interact</div>
+
+        <!-- Top-center: warning banner (HZ alerts) -->
+        <div id="warning-banner" class="hidden">
+            <span id="warning-text"></span>
+        </div>
+
+        <!-- BSC status indicators -->
+        <div id="bsc-status" class="hidden">
+            <div>Blower: <span id="bsc-blower-status">OFF</span></div>
+            <div>HEPA: <span id="bsc-hepa-status">—</span></div>
+            <div>Sash: <span id="bsc-sash-status">—</span></div>
+            <div>Surface: <span id="bsc-surface-status">Not sanitized</span></div>
+        </div>
+    </div>
+
+    <!-- Microscope viewport modal (State 2) -->
+    <div id="microscope-modal" class="modal hidden">
+        <div class="modal-content microscope-viewport">
+            <h2>Phase-Contrast Microscope</h2>
+            <div id="microscope-canvas-container">
+                <canvas id="microscope-canvas" width="600" height="400"></canvas>
+            </div>
+            <div class="microscope-controls">
+                <button class="objective-btn active" data-magnification="4">4x</button>
+                <button class="objective-btn" data-magnification="10">10x</button>
+                <button class="objective-btn" data-magnification="40">40x</button>
+            </div>
+            <div class="confluency-input">
+                <label>Estimated Confluency (%):</label>
+                <input type="number" id="confluency-input" min="0" max="100" step="1">
+                <button id="confluency-submit">Submit Assessment</button>
+            </div>
+            <button id="microscope-close" class="modal-close">Close Viewport</button>
+        </div>
+    </div>
+
+    <!-- Hemocytometer viewport modal (State 4) -->
+    <div id="hemocytometer-modal" class="modal hidden">
+        <div class="modal-content hemocytometer-viewport">
+            <h2>Hemocytometer — Neubauer Grid</h2>
+            <canvas id="hemocytometer-canvas" width="600" height="600"></canvas>
+            <div id="hemo-counters">
+                <div>Viable (clear): <span id="live-count">0</span></div>
+                <div>Non-viable (blue): <span id="dead-count">0</span></div>
+                <div>Quadrants tallied: <span id="quadrants-done">0</span> / 4</div>
+            </div>
+            <div id="hemo-quad-select">
+                <span>Counting quadrant:</span>
+                <button class="quad-btn active" data-quad="0">TL</button>
+                <button class="quad-btn" data-quad="1">TR</button>
+                <button class="quad-btn" data-quad="2">BL</button>
+                <button class="quad-btn" data-quad="3">BR</button>
+            </div>
+            <button id="hemo-finish" class="hidden">Finish Counting</button>
+            <button id="hemo-close" class="modal-close">Close</button>
+        </div>
+    </div>
+
+    <!-- Calculation / results modals -->
+    <div id="calculation-modal" class="modal hidden">
+        <div class="modal-content">
+            <h2 id="calc-modal-title">Calculation</h2>
+            <div id="calc-modal-body"></div>
+            <button id="calc-modal-ok" class="modal-close">OK</button>
+        </div>
+    </div>
+
+    <!-- Vessel labeling form (State 5) -->
+    <div id="label-modal" class="modal hidden">
+        <div class="modal-content">
+            <h2>Vessel Labeling</h2>
+            <div class="label-form">
+                <label>Cell Line: <input type="text" id="label-line" value="CHO-K1" readonly></label>
+                <label>Passage: <input type="text" id="label-passage" readonly></label>
+                <label>Date: <input type="text" id="label-date" readonly></label>
+                <label>Operator Initials: <input type="text" id="label-initials" maxlength="4" placeholder="e.g. SR"></label>
+            </div>
+            <button id="label-submit">Attach Label</button>
+        </div>
+    </div>
+
+    <!-- Inoculation calculation form (State 5) -->
+    <div id="inoculation-modal" class="modal hidden">
+        <div class="modal-content">
+            <h2>Inoculum Volume Calculation</h2>
+            <p>C1 (your viable concentration): <span id="inoc-c1"></span> cells/mL</p>
+            <p>C2 (target seeding density): 1.0 × 10<sup>5</sup> cells/mL</p>
+            <p>V2 (destination volume): 10.0 mL</p>
+            <label>V1 (inoculum volume in mL): <input type="number" id="inoc-v1" step="0.01" min="0"></label>
+            <button id="inoc-submit">Submit</button>
+        </div>
+    </div>
+
+    <!-- Admin terminal (F2) -->
+    <div id="admin-modal" class="modal hidden">
+        <div class="modal-content admin-panel">
+            <h2>Instructor Administrative Terminal</h2>
+            <div id="admin-login">
+                <label>PIN: <input type="password" id="admin-pin" maxlength="10"></label>
+                <button id="admin-login-btn">Authenticate</button>
+                <p id="admin-login-error" class="hidden error-text"></p>
+            </div>
+            <div id="admin-controls" class="hidden">
+                <h3>Scenario Configuration (D1)</h3>
+                <label>Starting Confluency:
+                    <select id="admin-confluency">
+                        <option value="40">40%</option>
+                        <option value="80" selected>80%</option>
+                        <option value="100">100%</option>
+                    </select>
+                </label>
+                <label>Ground Truth Cell Density (cells/mL):
+                    <input type="number" id="admin-density" value="1000000" min="100000" max="5000000">
+                </label>
+                <h3>Session Logs (D2)</h3>
+                <div id="admin-logs"></div>
+                <button id="admin-export">Export Session JSON</button>
+                <button id="admin-close" class="modal-close">Close Terminal</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Confirmation / instruction hold modals -->
+    <div id="confirm-modal" class="modal hidden">
+        <div class="modal-content">
+            <h2 id="confirm-title">Confirmation</h2>
+            <p id="confirm-message"></p>
+            <div class="confirm-buttons">
+                <button id="confirm-yes">Confirm</button>
+                <button id="confirm-no">Cancel</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Session complete / audit summary -->
+    <div id="audit-modal" class="modal hidden">
+        <div class="modal-content">
+            <h2>Session Complete — Audit Summary</h2>
+            <pre id="audit-json"></pre>
+            <button id="audit-export">Download JSON</button>
+            <button id="audit-restart">New Session</button>
+        </div>
+    </div>
+
+    <script type="importmap">
+    {
+        "imports": {
+            "three": "https://cdn.jsdelivr.net/npm/three@0.170.0/build/three.module.js",
+            "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.170.0/examples/jsm/"
+        }
+    }
+    </script>
+    <script type="module" src="main.js"></script>
+</body>
+</html>
