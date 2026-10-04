@@ -87,6 +87,13 @@ export class BiologyEngine {
         const D1 = this.sm.D1;
         if (D3.trypsin_activity_state !== 'Active') return;
 
+        // Prevent tap from overwriting Lysed state [HZ-003]
+        if (D3.cell_adhesion_state === 'Lysed') {
+            this.sm.showWarning('Enzymatic overexposure has lysed the culture. Mechanical agitation cannot restore viability.', true);
+            setTimeout(() => this.sm.clearWarning(), 3000);
+            return;
+        }
+
         const elapsedMinutes = D3.trypsin_timer_elapsed / 60.0;
 
         if (elapsedMinutes >= D1.trypsin_incubation_nominal[0] &&
@@ -207,7 +214,6 @@ export class BiologyEngine {
         ctx.fillStyle = '#4fc3f7';
         ctx.font = '14px monospace';
         ctx.fillText(`${mag}x`, 20, h - 20);
-        ctx.fillText(`Confluency GT: ${confluency}%`, 20, h - 40);
     }
 
     submitConfluency(value, stateMachine, labEnv) {
@@ -246,6 +252,9 @@ export class BiologyEngine {
                         `<p>Variance: <strong>${Math.abs(value - groundTruth)}%</strong></p>` +
                         `<p style="color:#f44336">⚠ Override penalty applied (-15 points)</p>`
                     );
+                    if (stateMachine && typeof stateMachine.transition === 'function') {
+                        stateMachine.transition(States.DISSOCIATION);
+                    }
                 },
                 () => {
                     // Re-incubation chosen: notify user
@@ -266,6 +275,9 @@ export class BiologyEngine {
                     `<p style="color:#4caf50">✓ Perfect assessment</p>` :
                     `<p>Proceed to enzymatic dissociation.</p>`)
             );
+            if (stateMachine && typeof stateMachine.transition === 'function') {
+                stateMachine.transition(States.DISSOCIATION);
+            }
         }
     }
 
@@ -499,16 +511,6 @@ export class BiologyEngine {
             `<p><strong>Ground Truth Density:</strong> ${D1.ground_truth_cell_density.toExponential(2)} cells/mL</p>` +
             `<p><strong>Density Variance:</strong> ${densityVariance.toFixed(1)}%</p>`
         );
-
-        if (typeof document !== 'undefined') {
-            const okBtn = document.getElementById('calc-modal-ok');
-            if (okBtn) {
-                okBtn.onclick = () => {
-                    const cModal = document.getElementById('calculation-modal');
-                    if (cModal) cModal.classList.add('hidden');
-                };
-            }
-        }
     }
 
     // ——— Secondary Inoculation & Dilution Calculations (Process 5.0, [FR-021], Appendix C.1.3) ———
@@ -549,16 +551,6 @@ export class BiologyEngine {
         if (!accurate) {
             this.sm.D2.technique_score = Math.max(0, this.sm.D2.technique_score - 10);
         }
-
-        if (typeof document !== 'undefined') {
-            const okBtn = document.getElementById('calc-modal-ok');
-            if (okBtn) {
-                okBtn.onclick = () => {
-                    const cModal = document.getElementById('calculation-modal');
-                    if (cModal) cModal.classList.add('hidden');
-                };
-            }
-        }
     }
 
     // ——— Vessel Labeling ([FR-022]) ———
@@ -587,15 +579,5 @@ export class BiologyEngine {
             `<p><strong>Label:</strong> ${label}</p>` +
             `<p>Cell Line: CHO-K1 | Passage: P+1 | Date: ${date} | Operator: ${cleanInitials}</p>`
         );
-
-        if (typeof document !== 'undefined') {
-            const okBtn = document.getElementById('calc-modal-ok');
-            if (okBtn) {
-                okBtn.onclick = () => {
-                    const cModal = document.getElementById('calculation-modal');
-                    if (cModal) cModal.classList.add('hidden');
-                };
-            }
-        }
     }
 }

@@ -118,6 +118,23 @@ test('Enzymatic overexposure >= 8.0 min triggers HZ-003, 65% lysis penalty, and 
     assert.strictEqual(sm.D1.ground_truth_dead_cells, initialDead + expectedDied); // 127
 });
 
+test('Mechanical tap does NOT overwrite Lysed state [HZ-003 guard]', () => {
+    const sm = new SessionManager();
+    const bio = new BiologyEngine(sm);
+    const stateMachine = new LabStateMachine(sm, bio);
+    stateMachine.currentState = States.DISSOCIATION;
+
+    sm.D3.trypsin_activity_state = 'Active';
+    sm.D3.cell_adhesion_state = 'Lysed';
+    sm.D3.trypsin_timer_elapsed = 240; // 4.0 minutes
+
+    bio.registerTap(stateMachine);
+
+    // Must remain Lysed and not reset to Suspension
+    assert.strictEqual(sm.D3.cell_adhesion_state, 'Lysed');
+    assert.strictEqual(sm.D2.mechanical_tap_detected, false);
+});
+
 // -------------------------------------------------------------
 // Test Group 2: Phase-Contrast Microscope & Confluency Verification
 // -------------------------------------------------------------
@@ -140,23 +157,74 @@ test('Microscope magnification selection and 10x inspection flag [FR-007–008]'
     assert.strictEqual(sm.D3.microscope_magnification, 10);
 });
 
-test('Confluency assessment >= 70% records assessment and variance [FR-009]', () => {
+test('Microscope view does NOT leak Confluency GT on canvas', () => {
+    const sm = new SessionManager();
+    const bio = new BiologyEngine(sm);
+
+    const filledTexts = [];
+    const mockCtx = {
+        fillStyle: '',
+        fillRect: () => {},
+        save: () => {},
+        restore: () => {},
+        beginPath: () => {},
+        arc: () => {},
+        clip: () => {},
+        fill: () => {},
+        stroke: () => {},
+        strokeStyle: '',
+        lineWidth: 1,
+        moveTo: () => {},
+        lineTo: () => {},
+        font: '',
+        fillText: (txt) => { filledTexts.push(txt); }
+    };
+    const mockCanvas = {
+        width: 600,
+        height: 400,
+        getContext: () => mockCtx
+    };
+
+    globalThis.document = {
+        getElementById: (id) => (id === 'microscope-canvas' ? mockCanvas : null)
+    };
+
+    try {
+        bio.setMicroscopeMagnification(10);
+        // Verify 10x was rendered
+        assert.ok(filledTexts.includes('10x'), 'Should display magnification 10x');
+        // Verify NO ground truth leak
+        const leak = filledTexts.some(t => t.includes('Confluency GT'));
+        assert.strictEqual(leak, false, 'Canvas overlay must NOT display ground truth confluency');
+    } finally {
+        delete globalThis.document;
+    }
+});
+
+test('Confluency assessment >= 70% transitions state from INSPECTION to DISSOCIATION [FR-009]', () => {
     const sm = new SessionManager();
     const bio = new BiologyEngine(sm);
     const stateMachine = new LabStateMachine(sm, bio);
 
+    stateMachine.currentState = States.INSPECTION;
+    sm.D3.microscope_inspected = true;
     sm.D1.starting_confluency = 80;
+
     bio.submitConfluency(85, stateMachine, null);
 
     assert.strictEqual(sm.D2.assessed_confluence_val, 85);
     assert.strictEqual(sm.D2.confluence_delta, 5);
     assert.strictEqual(sm.D2.violation_log.length, 0);
+    assert.strictEqual(stateMachine.getCurrentState(), States.DISSOCIATION, 'Should transition to DISSOCIATION');
 });
 
-test('Confluency assessment < 70% with override applies -15 penalty and logs CONFLUENCY_OVERRIDE [FR-010]', () => {
+test('Confluency assessment < 70% with override applies -15 penalty, logs CONFLUENCY_OVERRIDE, and transitions to DISSOCIATION [FR-010]', () => {
     const sm = new SessionManager();
     const bio = new BiologyEngine(sm);
     const stateMachine = new LabStateMachine(sm, bio);
+
+    stateMachine.currentState = States.INSPECTION;
+    sm.D3.microscope_inspected = true;
 
     let confirmCb = null;
     sm.showConfirmModal = (title, msg, onConfirm, onCancel) => {
@@ -166,11 +234,13 @@ test('Confluency assessment < 70% with override applies -15 penalty and logs CON
     bio.submitConfluency(50, stateMachine, null);
     assert.strictEqual(sm.D2.assessed_confluence_val, 50);
     assert.ok(typeof confirmCb === 'function', 'Confirm callback must be provided');
+    assert.strictEqual(stateMachine.getCurrentState(), States.INSPECTION, 'Should not transition before confirm');
 
     // Simulate clicking "Confirm / Override"
     confirmCb();
     assert.ok(sm.D2.violation_log.includes('CONFLUENCY_OVERRIDE'));
     assert.strictEqual(sm.D2.technique_score, 85); // 100 - 15
+    assert.strictEqual(stateMachine.getCurrentState(), States.DISSOCIATION, 'Should transition to DISSOCIATION upon override');
 });
 
 // -------------------------------------------------------------
