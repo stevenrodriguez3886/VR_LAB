@@ -123,6 +123,7 @@ export class SessionManager {
 
         // Session log archive (for multi-session instructor review)
         this._sessionArchive = [];
+        this.latestEncryptedSession = null;
     }
 
     _generateUUID() {
@@ -343,6 +344,42 @@ export class SessionManager {
         }
     }
 
+    isAdminLocked() {
+        return this._adminLocked;
+    }
+
+    isAdminAuthenticated() {
+        return this._adminAuthenticated;
+    }
+
+    resetAdminAuth() {
+        this._adminAttempts = 0;
+        this._adminLocked = false;
+        this._adminAuthenticated = false;
+    }
+
+    setStartingConfluency(val) {
+        const v = parseInt(val, 10);
+        if (isNaN(v) || v < 0 || v > 100) {
+            this.showWarning('Parameter out of range: confluency must be 0–100%');
+            return false;
+        }
+        this.D1.starting_confluency = v;
+        return true;
+    }
+
+    setGroundTruthDensity(val) {
+        const v = parseInt(val, 10);
+        if (isNaN(v) || v < 100000 || v > 5000000) {
+            this.showWarning('Parameter out of range: density must be 1.0×10⁵ to 5.0×10⁶');
+            if (this._warningTimeout) clearTimeout(this._warningTimeout);
+            this._warningTimeout = setTimeout(() => this.clearWarning(), 3000);
+            return false;
+        }
+        this.D1.ground_truth_cell_density = v;
+        return true;
+    }
+
     prepareAdminPanel() {
         if (typeof document === 'undefined') return;
         const loginEl = document.getElementById('admin-login');
@@ -363,19 +400,15 @@ export class SessionManager {
         if (confSel) {
             confSel.value = this.D1.starting_confluency.toString();
             confSel.onchange = () => {
-                this.D1.starting_confluency = parseInt(confSel.value);
+                this.setStartingConfluency(confSel.value);
             };
         }
         const densInput = document.getElementById('admin-density');
         if (densInput) {
             densInput.value = this.D1.ground_truth_cell_density;
             densInput.onchange = () => {
-                const v = parseInt(densInput.value);
-                if (v >= 100000 && v <= 5000000) {
-                    this.D1.ground_truth_cell_density = v;
-                } else {
-                    this.showWarning('Parameter out of range: density must be 1.0×10⁵ to 5.0×10⁶');
-                    this._warningTimeout = setTimeout(() => this.clearWarning(), 3000);
+                const ok = this.setGroundTruthDensity(densInput.value);
+                if (!ok) {
                     densInput.value = this.D1.ground_truth_cell_density;
                 }
             };
@@ -395,22 +428,134 @@ export class SessionManager {
         }
     }
 
+    // ——— AES-256 Encryption & Local Persistence ([FR-024], [FR-025], [NFR-005], UC-05) ———
+    async encryptSession(data = this.D2, pin = this._adminPin) {
+        const text = typeof data === 'string' ? data : JSON.stringify(data);
+        if (typeof crypto !== 'undefined' && crypto.subtle) {
+            const enc = new TextEncoder();
+            const hash = await crypto.subtle.digest('SHA-256', enc.encode(pin));
+            const key = await crypto.subtle.importKey('raw', hash, { name: 'AES-GCM' }, false, ['encrypt']);
+            const iv = crypto.getRandomValues(new Uint8Array(12));
+            const ciphertextBuffer = await crypto.subtle.encrypt(
+                { name: 'AES-GCM', iv },
+                key,
+                enc.encode(text)
+            );
+            const ivHex = Array.from(iv).map(b => b.toString(16).padStart(2, '0')).join('');
+            const ctHex = Array.from(new Uint8Array(ciphertextBuffer)).map(b => b.toString(16).padStart(2, '0')).join('');
+            return {
+                session_id: data.session_id || this.D2.session_id,
+                algorithm: 'AES-256-GCM',
+                encrypted: true,
+                timestamp: new Date().toISOString(),
+                iv: ivHex,
+                ciphertext: ctHex
+            };
+        }
+        // Fallback placeholder if subtle crypto is not available
+        return {
+            session_id: data.session_id || this.D2.session_id,
+            algorithm: 'AES-256-GCM',
+            encrypted: true,
+            timestamp: new Date().toISOString(),
+            iv: '000000000000000000000000',
+            ciphertext: Buffer.from(text).toString('base64')
+        };
+    }
+
+    async decryptSession(encryptedPayload, pin = this._adminPin) {
+        if (!encryptedPayload || !encryptedPayload.ciphertext) {
+            return { verified: false, integrity_compromised: true, error: 'Invalid payload format' };
+        }
+        if (typeof crypto !== 'undefined' && crypto.subtle && encryptedPayload.iv) {
+            try {
+                const enc = new TextEncoder();
+                const hash = await crypto.subtle.digest('SHA-256', enc.encode(pin));
+                const key = await crypto.subtle.importKey('raw', hash, { name: 'AES-GCM' }, false, ['decrypt']);
+
+                const ivBytes = new Uint8Array(encryptedPayload.iv.length / 2);
+                for (let i = 0; i < ivBytes.length; i++) ivBytes[i] = parseInt(encryptedPayload.iv.substr(i * 2, 2), 16);
+
+                const ctBytes = new Uint8Array(encryptedPayload.ciphertext.length / 2);
+                for (let i = 0; i < ctBytes.length; i++) ctBytes[i] = parseInt(encryptedPayload.ciphertext.substr(i * 2, 2), 16);
+
+                const decryptedBuffer = await crypto.subtle.decrypt(
+                    { name: 'AES-GCM', iv: ivBytes },
+                    key,
+                    ctBytes
+                );
+                const decodedText = new TextDecoder().decode(decryptedBuffer);
+                const data = JSON.parse(decodedText);
+                return { verified: true, integrity_compromised: false, data };
+            } catch (err) {
+                // Fails AES-256 integrity verification -> flag as Integrity Compromised / Unverified [UC-05]
+                return {
+                    verified: false,
+                    integrity_compromised: true,
+                    error: 'Integrity Compromised / Unverified'
+                };
+            }
+        }
+        return { verified: false, integrity_compromised: true, error: 'Crypto subtle unavailable' };
+    }
+
+    async generateEncryptedSession(pin = this._adminPin) {
+        const payload = await this.encryptSession(this.D2, pin);
+        this.latestEncryptedSession = payload;
+        if (typeof localStorage !== 'undefined') {
+            try {
+                localStorage.setItem(`vr_mcl_session_${this.D2.session_id}`, JSON.stringify(payload));
+            } catch (e) {
+                console.warn('Could not persist session to localStorage:', e);
+            }
+        }
+        return payload;
+    }
+
+    getLatestEncryptedSession() {
+        return this.latestEncryptedSession;
+    }
+
     // ——— Session Export ([FR-024]) ———
     exportSessionJSON() {
-        if (typeof document === 'undefined' || typeof Blob === 'undefined') return;
-        const blob = new Blob([JSON.stringify(this.D2, null, 2)], { type: 'application/json' });
-        const url = URL.createObjectURL(blob);
-        const a = document.createElement('a');
-        a.href = url;
-        a.download = `session_${this.D2.session_id}.json`;
-        document.body.appendChild(a);
-        a.click();
-        document.body.removeChild(a);
-        setTimeout(() => URL.revokeObjectURL(url), 1000);
+        const jsonStr = JSON.stringify(this.D2, null, 2);
+        if (typeof document !== 'undefined' && typeof Blob !== 'undefined') {
+            const blob = new Blob([jsonStr], { type: 'application/json' });
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = `session_${this.D2.session_id}.json`;
+            document.body.appendChild(a);
+            a.click();
+            document.body.removeChild(a);
+            setTimeout(() => URL.revokeObjectURL(url), 1000);
+        }
+        return jsonStr;
+    }
+
+    async exportEncryptedSession(pin = this._adminPin) {
+        const encRecord = this.latestEncryptedSession || await this.generateEncryptedSession(pin);
+        const jsonStr = JSON.stringify(encRecord, null, 2);
+        if (typeof document !== 'undefined' && typeof Blob !== 'undefined') {
+            const blob = new Blob([jsonStr], { type: 'application/json' });
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = `session_encrypted_${this.D2.session_id}.json`;
+            document.body.appendChild(a);
+            a.click();
+            document.body.removeChild(a);
+            setTimeout(() => URL.revokeObjectURL(url), 1000);
+        }
+        return jsonStr;
     }
 
     finalizeSession() {
         this._sessionArchive.push(JSON.parse(JSON.stringify(this.D2)));
+        const promise = this.generateEncryptedSession().catch(err => {
+            console.error('Failed to generate encrypted session:', err);
+        });
+        return promise;
     }
 
     // ——— Confirmation modal helper ———

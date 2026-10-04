@@ -215,7 +215,10 @@ export function createLabEnvironment(scene, sessionManager) {
                 sm.D3.blower_purge_elapsed = 0;
                 switchBody.material = new THREE.MeshStandardMaterial({ color: 0x4caf50, emissive: 0x4caf50, emissiveIntensity: 0.3 });
                 obj.userData.tooltipText = 'Blower ON — Purging...';
-                document.getElementById('bsc-status').classList.remove('hidden');
+                if (typeof document !== 'undefined') {
+                    const bscStatusEl = document.getElementById('bsc-status');
+                    if (bscStatusEl) bscStatusEl.classList.remove('hidden');
+                }
                 sm.updateBSCDisplay();
             }
         }
@@ -335,7 +338,7 @@ export function createLabEnvironment(scene, sessionManager) {
             } else if (obj.userData.nearGrille) {
                 obj.userData.nearGrille = false;
                 testObject.position.set(-2, 1.55, -2.3);
-                sm.clearWarning();
+                sm.clearGrilleViolation();
                 obj.userData.tooltipText = 'Media Bottle — Positioned safely ✓';
             }
         }
@@ -382,7 +385,10 @@ export function createLabEnvironment(scene, sessionManager) {
                 } else { return; }
             }
             if (state > States.INSPECTION) return;
-            document.getElementById('microscope-modal').classList.remove('hidden');
+            if (typeof document !== 'undefined') {
+                const modal = document.getElementById('microscope-modal');
+                if (modal) modal.classList.remove('hidden');
+            }
             ctx.controls?.unlock?.();
             ctx.biologyEngine?.renderMicroscopeView?.();
         }
@@ -607,7 +613,10 @@ export function createLabEnvironment(scene, sessionManager) {
                 setTimeout(() => sm.clearWarning(), 3000); return;
             }
             sm.D3.hemocytometer_loaded = true;
-            document.getElementById('hemocytometer-modal').classList.remove('hidden');
+            if (typeof document !== 'undefined') {
+                const hModal = document.getElementById('hemocytometer-modal');
+                if (hModal) hModal.classList.remove('hidden');
+            }
             ctx.controls?.unlock?.();
             ctx.biologyEngine?.renderHemocytometerGrid?.();
         }
@@ -636,14 +645,23 @@ export function createLabEnvironment(scene, sessionManager) {
             }
             if (ctx.stateMachine.getCurrentState() !== States.INOCULATION) return;
             if (!sm.D3.inoculation_volume_set) {
-                document.getElementById('inoc-c1').textContent = sm.D2.calculated_density.toExponential(2);
-                document.getElementById('inoculation-modal').classList.remove('hidden');
+                if (typeof document !== 'undefined') {
+                    const c1El = document.getElementById('inoc-c1');
+                    if (c1El) c1El.textContent = sm.D2.calculated_density.toExponential(2);
+                    const iModal = document.getElementById('inoculation-modal');
+                    if (iModal) iModal.classList.remove('hidden');
+                }
                 ctx.controls?.unlock?.();
             } else if (!sm.D3.vessel_labeled) {
-                const now = new Date();
-                document.getElementById('label-passage').value = 'P+1';
-                document.getElementById('label-date').value = now.toISOString().split('T')[0];
-                document.getElementById('label-modal').classList.remove('hidden');
+                if (typeof document !== 'undefined') {
+                    const now = new Date();
+                    const pEl = document.getElementById('label-passage');
+                    if (pEl) pEl.value = 'P+1';
+                    const dEl = document.getElementById('label-date');
+                    if (dEl) dEl.value = now.toISOString().split('T')[0];
+                    const lModal = document.getElementById('label-modal');
+                    if (lModal) lModal.classList.remove('hidden');
+                }
                 ctx.controls?.unlock?.();
             }
         }
