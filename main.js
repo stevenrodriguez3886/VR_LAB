@@ -83,7 +83,7 @@ function isAnyModalOpen() {
 }
 
 // ——— Movement ———
-const moveSpeed = 4.0;
+const moveSpeed = 40.0;
 const keys = { forward: false, backward: false, left: false, right: false };
 const velocity = new THREE.Vector3();
 const direction = new THREE.Vector3();
@@ -177,14 +177,92 @@ function handleAdminToggle() {
     }
 }
 
-// ——— Collision bounds (simple AABB for walls) ———
+// ——— Collision system ———
+const PLAYER_RADIUS = 0.3; // player capsule radius in XZ plane
+
+// Static collider AABBs: { minX, maxX, minZ, maxZ }
+// All values account for PLAYER_RADIUS being pushed outward from surfaces.
+const staticColliders = [
+    // Room outer walls (keep player inside)
+    // Left wall at x = -6, Right wall at x = 6
+    // Back wall at z = 10, Front wall at z = -10
+];
+
+// Furniture / equipment colliders (keep player outside)
+const furnitureColliders = [
+    // Main workbench: center (1.6, -2.5), size (3.6, 1.6) → x: -0.2..3.4, z: -3.3..-1.7
+    { minX: -0.2, maxX: 3.4, minZ: -3.3, maxZ: -1.7, label: 'bench' },
+    // BSC body: center (-2, -2), size (2.4, 1.0) → x: -3.2..-0.8, z: -2.5..-1.5
+    { minX: -3.2, maxX: -0.8, minZ: -2.5, maxZ: -1.5, label: 'bsc' },
+    // Microscope: center (3, 0), base size (0.5, 0.4) → generous hitbox
+    { minX: 2.6, maxX: 3.4, minZ: -0.3, maxZ: 0.3, label: 'microscope' },
+    // PPE Locker: center (4, 8), size (1.2, 0.6) → x: 3.4..4.6, z: 7.7..8.3
+    { minX: 3.4, maxX: 4.6, minZ: 7.7, maxZ: 8.3, label: 'locker' },
+    // CO2 Incubator: center (4, -5), size (1.0, 0.8) → x: 3.5..4.5, z: -5.4..-4.6
+    { minX: 3.5, maxX: 4.5, minZ: -5.4, maxZ: -4.6, label: 'incubator' },
+    // Vacuum cart: center (-3.5, -2), size (0.35, 0.35) → small but collidable
+    { minX: -3.75, maxX: -3.25, minZ: -2.25, maxZ: -1.75, label: 'vacuum' },
+];
+
+// Divider wall segments at z = 4
+// Left section: x = -6 to -1, Right section: x = 1 to 6
+// Doorway gap: x = -1 to 1 (2m wide), below header at y < 3
+// Wall thickness ~ 0.15m, so collider z range: 3.9..4.1
+const dividerLeft  = { minX: -6.0, maxX: -1.0, minZ: 3.85, maxZ: 4.15, label: 'divider-L' };
+const dividerRight = { minX:  1.0, maxX:  6.0, minZ: 3.85, maxZ: 4.15, label: 'divider-R' };
+// Doorway blocker (when door is closed): x = -1 to 1
+const doorwayBlocker = { minX: -1.0, maxX: 1.0, minZ: 3.85, maxZ: 4.15, label: 'door' };
+
+function resolveColliderPush(pos, collider) {
+    // Check if player circle overlaps this AABB
+    // Expand the AABB by PLAYER_RADIUS and test if pos is inside
+    const eMinX = collider.minX - PLAYER_RADIUS;
+    const eMaxX = collider.maxX + PLAYER_RADIUS;
+    const eMinZ = collider.minZ - PLAYER_RADIUS;
+    const eMaxZ = collider.maxZ + PLAYER_RADIUS;
+
+    if (pos.x > eMinX && pos.x < eMaxX && pos.z > eMinZ && pos.z < eMaxZ) {
+        // Player is overlapping — push out on the axis of least penetration
+        const pushLeft  = pos.x - eMinX;
+        const pushRight = eMaxX - pos.x;
+        const pushBack  = pos.z - eMinZ;
+        const pushFront = eMaxZ - pos.z;
+
+        const minPush = Math.min(pushLeft, pushRight, pushBack, pushFront);
+
+        if (minPush === pushLeft)       pos.x = eMinX;
+        else if (minPush === pushRight) pos.x = eMaxX;
+        else if (minPush === pushBack)  pos.z = eMinZ;
+        else                            pos.z = eMaxZ;
+    }
+}
+
 function clampPlayerPosition() {
     const pos = camera.position;
-    const minX = -5.5, maxX = 5.5;
-    const minZ = -9.5, maxZ = 9.5;
-    pos.x = Math.max(minX, Math.min(maxX, pos.x));
-    pos.z = Math.max(minZ, Math.min(maxZ, pos.z));
-    pos.y = 1.65; // lock eye height
+
+    // Outer room bounds (keep player inside)
+    const margin = PLAYER_RADIUS;
+    pos.x = Math.max(-6 + margin, Math.min(6 - margin, pos.x));
+    pos.z = Math.max(-10 + margin, Math.min(10 - margin, pos.z));
+
+    // Divider wall segments (always solid)
+    resolveColliderPush(pos, dividerLeft);
+    resolveColliderPush(pos, dividerRight);
+
+    // Doorway: blocked when door is closed
+    const doorObj = labEnv.getLabObjects().door;
+    const doorIsOpen = doorObj && doorObj.userData.isOpen;
+    if (!doorIsOpen) {
+        resolveColliderPush(pos, doorwayBlocker);
+    }
+
+    // Furniture colliders
+    for (const c of furnitureColliders) {
+        resolveColliderPush(pos, c);
+    }
+
+    // Lock eye height
+    pos.y = 1.65;
 }
 
 // ——— Animation Loop ———
