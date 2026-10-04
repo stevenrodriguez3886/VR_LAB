@@ -345,6 +345,46 @@ await runTest('Intake grille hazard [HZ-001]: placement disrupts air curtain, re
     assert.strictEqual(labObjects.testObject.userData.nearGrille, false);
 });
 
+await runTest('Thermal stress violation when cold reagent (< 37°C) is introduced [FR-006]', () => {
+    const { sm, fsm, labObjects, ctx } = createTestLab();
+    fsm.currentState = States.CABINET_SETUP;
+    assert.strictEqual(sm.D2.technique_score, 100);
+    assert.strictEqual(sm.D2.violation_log.includes('THERMAL_STRESS'), false);
+
+    // 1. Direct validation: pre-warmed reagent (37.0°C) is compliant
+    assert.strictEqual(sm.validateReagentTemperature(37.0), true);
+    assert.strictEqual(sm.D2.technique_score, 100);
+    assert.strictEqual(sm.D2.violation_log.includes('THERMAL_STRESS'), false);
+
+    // 2. Direct validation: cold reagent (< 36.5°C) triggers violation and -10 penalty
+    assert.strictEqual(sm.validateReagentTemperature(22.0), false);
+    assert.strictEqual(sm.D2.technique_score, 90);
+    assert.strictEqual(sm.D2.violation_log.includes('THERMAL_STRESS'), true);
+
+    const warnBanner = getOrCreateElement('warning-banner');
+    const warnText = getOrCreateElement('warning-text');
+    assert.strictEqual(warnBanner.classList.contains('hidden'), false);
+    assert.match(warnText.textContent, /THERMAL STRESS|FR-006/i);
+
+    // 3. Container retrieval into BSC with cold temperature evaluates upon introduction
+    const coldLab = createTestLab();
+    coldLab.fsm.currentState = States.CABINET_SETUP;
+    coldLab.labObjects.testObject.userData.temperature = 4.0; // refrigerator cold
+    coldLab.labObjects.testObject.userData.onInteract(coldLab.labObjects.testObject, coldLab.ctx);
+    assert.strictEqual(coldLab.sm.D2.violation_log.includes('THERMAL_STRESS'), true);
+    // Score reflects -10 (thermal stress) and -5 (grille hazard) = 85
+    assert.strictEqual(coldLab.sm.D2.technique_score, 85);
+
+    // 4. Dispensing cold PBS wash buffer
+    const coldWashLab = createTestLab();
+    coldWashLab.fsm.currentState = States.DISSOCIATION;
+    coldWashLab.sm.D3.medium_aspirated = true;
+    coldWashLab.labObjects.pbsBottle.userData.temperature = 20.0; // room temperature
+    coldWashLab.labObjects.pbsBottle.userData.onInteract(coldWashLab.labObjects.pbsBottle, coldWashLab.ctx);
+    assert.strictEqual(coldWashLab.sm.D2.violation_log.includes('THERMAL_STRESS'), true);
+    assert.strictEqual(coldWashLab.sm.D2.technique_score, 90);
+});
+
 // ============================================================================
 // Suite 3: State 1 -> State 2 -> State 3 (Inspection to Dissociation)
 // ============================================================================
@@ -451,6 +491,41 @@ await runTest('5.0 mL PBS wash dispensed down sidewall [FR-012]', () => {
     assert.strictEqual(sm.D3.pbs_washed, true);
     assert.strictEqual(sm.D3.pbs_volume_in_flask, 5.0);
     assert.strictEqual(sm.D2.pbs_wash_vol_actual, 5.0);
+});
+
+await runTest('Perpendicular wash angle penalty (-10 points, sidewall violation count incremented) [FR-012]', () => {
+    const { sm, fsm, labObjects, ctx } = createTestLab();
+    fsm.currentState = States.DISSOCIATION;
+    sm.D3.medium_aspirated = true;
+    assert.strictEqual(sm.D2.technique_score, 100);
+    assert.strictEqual(sm.D2.sidewall_violations, 0);
+
+    // 1. Validating compliant angle (<= 45°) does not penalize
+    assert.strictEqual(sm.validateDispenseAngle(30.0), true);
+    assert.strictEqual(sm.D2.sidewall_violations, 0);
+    assert.strictEqual(sm.D2.technique_score, 100);
+
+    // 2. Direct validation with perpendicular angle (> 45°) incurs penalty
+    assert.strictEqual(sm.validateDispenseAngle(90.0), false);
+    assert.strictEqual(sm.D2.sidewall_violations, 1);
+    assert.strictEqual(sm.D2.technique_score, 90);
+    assert.strictEqual(sm.D2.violation_log.includes('SIDEWALL_SHEAR'), true);
+
+    // 3. Interactive PBS wash with perpendicular angle (90°)
+    const lab2 = createTestLab();
+    lab2.fsm.currentState = States.DISSOCIATION;
+    lab2.sm.D3.medium_aspirated = true;
+    lab2.labObjects.pbsBottle.userData.dispenseAngle = 90.0; // perpendicular to monolayer
+    lab2.labObjects.pbsBottle.userData.onInteract(lab2.labObjects.pbsBottle, lab2.ctx);
+
+    assert.strictEqual(lab2.sm.D2.sidewall_violations, 1);
+    assert.strictEqual(lab2.sm.D2.technique_score, 90);
+    assert.strictEqual(lab2.sm.D2.violation_log.includes('SIDEWALL_SHEAR'), true);
+
+    const warnBanner = getOrCreateElement('warning-banner');
+    const warnText = getOrCreateElement('warning-text');
+    assert.strictEqual(warnBanner.classList.contains('hidden'), false);
+    assert.match(warnText.textContent, /Perpendicular Dispense|Fluid Shear/i);
 });
 
 await runTest('2.5 mL 0.25% Trypsin-EDTA dispenses and starts incubation timer [FR-013]', () => {
@@ -825,6 +900,69 @@ await runTest('Tamper detection: corrupted ciphertext or wrong PIN fails AES-256
 // Suite 8: Full End-to-End Walkthrough (State 0 -> Complete in a single flow)
 // ============================================================================
 console.log('\n--- Test Suite 8: Complete End-to-End Lifecycle Walkthrough ---');
+
+await runTest('Scenario B.2 full penalty accumulation (intake grille blockage + perpendicular wash = -15 or -20 points)', () => {
+    const { sm, bio, fsm, labObjects, ctx, labEnv } = createTestLab();
+    fsm.currentState = States.CABINET_SETUP;
+    assert.strictEqual(sm.D2.technique_score, 100);
+
+    // Step 1: Intake Grille Blockage Hazard [HZ-001]
+    labObjects.testObject.userData.onInteract(labObjects.testObject, ctx);
+    assert.strictEqual(sm.D3.air_curtain_integrity, false);
+    assert.strictEqual(sm.D2.grille_blockage_events, 1);
+    assert.strictEqual(sm.D2.violation_log.includes('HZ-001'), true);
+    assert.strictEqual(sm.D2.technique_score, 95); // -5 penalty
+
+    // Remediation: Jordan moves the media bottle to the center-rear work zone
+    labObjects.testObject.userData.onInteract(labObjects.testObject, ctx);
+    assert.strictEqual(sm.D3.air_curtain_integrity, true);
+    assert.strictEqual(labObjects.testObject.userData.nearGrille, false);
+
+    // Complete cabinet setup prerequisites
+    sm.D3.hepa_blower_active = true;
+    labEnv.update(sm.D1.blower_purge_delay_sim, fsm, sm);
+    sm.D3.sash_height = 20.0;
+    sm.D2.sash_compliance = true;
+    sm.D3.ethanol_applied = true;
+    labEnv.update(sm.D1.ethanol_evaporation_time_sim, fsm, sm);
+    sm.D3.apparatus_staged = true;
+
+    // Transition to Phase 2: Inspection
+    labObjects.microscope.userData.onInteract(labObjects.microscope, ctx);
+    assert.strictEqual(fsm.getCurrentState(), States.INSPECTION);
+    bio.setMicroscopeMagnification(10);
+    bio.submitConfluency(80, fsm, labEnv);
+    assert.strictEqual(fsm.getCurrentState(), States.DISSOCIATION);
+
+    // Step 2: Vacuum Aspiration
+    labObjects.vacuum.userData.onInteract(labObjects.vacuum, ctx);
+    assert.strictEqual(sm.D3.medium_aspirated, true);
+
+    // Step 3: Perpendicular Wash Angle Infraction [FR-012]
+    // User positions pipette vertically (90° perpendicular) over cell monolayer
+    labObjects.pbsBottle.userData.dispenseAngle = 90.0;
+    labObjects.pbsBottle.userData.onInteract(labObjects.pbsBottle, ctx);
+
+    assert.strictEqual(sm.D2.sidewall_violations, 1);
+    assert.strictEqual(sm.D2.violation_log.includes('SIDEWALL_SHEAR'), true);
+
+    // Remediation: Jordan tilts the culture flask at a 45-degree angle
+    labObjects.pbsBottle.userData.dispenseAngle = 45.0;
+
+    // Step 4: Verification of full penalty accumulation (-15 or -20 points)
+    const totalPenalty = 100 - sm.D2.technique_score;
+    assert.ok(
+        totalPenalty === 15 || totalPenalty === 20,
+        `Expected accumulated penalty of 15 or 20 points, got ${totalPenalty} (technique score: ${sm.D2.technique_score})`
+    );
+    assert.ok(sm.D2.technique_score === 85 || sm.D2.technique_score === 80);
+
+    // Itemized session log verification
+    assert.strictEqual(sm.D2.grille_blockage_events, 1);
+    assert.strictEqual(sm.D2.sidewall_violations, 1);
+    assert.strictEqual(sm.D2.violation_log.includes('HZ-001'), true);
+    assert.strictEqual(sm.D2.violation_log.includes('SIDEWALL_SHEAR'), true);
+});
 
 await runTest('Executes complete golden-path passaging protocol from Anteroom to Incubator & Audit', async () => {
     const { sm, bio, fsm, labObjects, ctx, labEnv } = createTestLab();

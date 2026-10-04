@@ -242,12 +242,44 @@ export class SessionManager {
         }
     }
 
-    // ——— Sidewall violation ———
+    // ——— Reagent Temperature Validation [FR-006] ———
+    validateReagentTemperature(temp) {
+        const t = (temp !== undefined && temp !== null) ? Number(temp) : this.D3.medium_temperature;
+        this.D3.medium_temperature = t;
+        if (t < 36.5 || t > 37.5) {
+            if (!this.D2.violation_log.includes('THERMAL_STRESS')) {
+                this.D2.violation_log.push('THERMAL_STRESS');
+            }
+            this.D2.technique_score = Math.max(0, this.D2.technique_score - 10);
+            this.showWarning(`[FR-006] Procedural Stress: Reagent temperature (${t.toFixed(1)}°C) outside nominal range (37.0 ± 0.5°C) — THERMAL STRESS`);
+            this._warningTimeout = setTimeout(() => this.clearWarning(), 4000);
+            return false;
+        }
+        return true;
+    }
+
+    checkReagentTemperature(temp) {
+        return this.validateReagentTemperature(temp);
+    }
+
+    // ——— Sidewall violation [FR-012] ———
     logSidewallViolation() {
         this.D2.sidewall_violations++;
+        if (!this.D2.violation_log.includes('SIDEWALL_SHEAR')) {
+            this.D2.violation_log.push('SIDEWALL_SHEAR');
+        }
         this.D2.technique_score = Math.max(0, this.D2.technique_score - 10);
         this.showWarning('Procedural Penalty: High Fluid Shear Damage to Monolayer (Perpendicular Dispense)');
         this._warningTimeout = setTimeout(() => this.clearWarning(), 4000);
+    }
+
+    validateDispenseAngle(angle) {
+        const limit = this.D1.pbs_dispense_angle_limit !== undefined ? this.D1.pbs_dispense_angle_limit : 45.0;
+        if (angle > limit) {
+            this.logSidewallViolation();
+            return false;
+        }
+        return true;
     }
 
     // ——— Overexposure [HZ-003] ———

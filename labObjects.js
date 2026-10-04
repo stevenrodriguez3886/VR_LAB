@@ -327,12 +327,20 @@ export function createLabEnvironment(scene, sessionManager) {
         type: 'media_bottle',
         inBSC: false,
         nearGrille: false,
+        temperature: 37.0,
+        validateTemperature: (temp, sm) => {
+            const mgr = sm || sessionManager;
+            return mgr.validateReagentTemperature(temp !== undefined ? temp : testObject.userData.temperature);
+        },
         onInteract: (obj, ctx) => {
             const sm = ctx.sessionManager;
             if (!obj.userData.inBSC) {
                 obj.userData.inBSC = true;
                 obj.userData.nearGrille = true;
                 testObject.position.set(-2, 1.55, -2 + 0.4);
+                // [FR-006] Validate reagent temperature upon container introduction into BSC
+                const temp = obj.userData.temperature !== undefined ? obj.userData.temperature : sm.D3.medium_temperature;
+                sm.validateReagentTemperature(temp);
                 sm.logGrilleViolation();
                 obj.userData.tooltipText = 'Media Bottle — ⚠ Too close to grille! Click to reposition';
             } else if (obj.userData.nearGrille) {
@@ -472,6 +480,23 @@ export function createLabEnvironment(scene, sessionManager) {
         interactable: true,
         tooltipText: 'PBS (DPBS 1X) — Wash monolayer [FR-012]',
         type: 'pbs',
+        temperature: 37.0,
+        dispenseAngle: 0.0,
+        validateDispensingAngle: (angle, sm) => {
+            const mgr = sm || sessionManager;
+            if (mgr && typeof mgr.validateDispenseAngle === 'function') {
+                return mgr.validateDispenseAngle(angle);
+            }
+            if (angle > (mgr?.D1?.pbs_dispense_angle_limit || 45.0)) {
+                mgr?.logSidewallViolation();
+                return false;
+            }
+            return true;
+        },
+        validateTemperature: (temp, sm) => {
+            const mgr = sm || sessionManager;
+            return mgr.validateReagentTemperature(temp !== undefined ? temp : pbsBottle.userData.temperature);
+        },
         onInteract: (obj, ctx) => {
             if (ctx.stateMachine.getCurrentState() !== States.DISSOCIATION) return;
             const sm = ctx.sessionManager;
@@ -479,6 +504,19 @@ export function createLabEnvironment(scene, sessionManager) {
                 sm.showWarning('Aspirate spent medium first.');
                 setTimeout(() => sm.clearWarning(), 3000); return;
             }
+
+            // [FR-006] Reagent temperature validation
+            const temp = obj.userData.temperature !== undefined ? obj.userData.temperature : sm.D3.medium_temperature;
+            sm.validateReagentTemperature(temp);
+
+            // [FR-012] Sidewall wash angle validation
+            const angle = obj.userData.dispenseAngle !== undefined ? obj.userData.dispenseAngle : (ctx.dispenseAngle ?? 0.0);
+            if (typeof sm.validateDispenseAngle === 'function') {
+                sm.validateDispenseAngle(angle);
+            } else if (angle > (sm.D1.pbs_dispense_angle_limit || 45.0)) {
+                sm.logSidewallViolation();
+            }
+
             if (!sm.D3.pbs_washed) {
                 sm.D3.pbs_volume_in_flask = 5.0;
                 sm.D2.pbs_wash_vol_actual = 5.0;
@@ -503,6 +541,11 @@ export function createLabEnvironment(scene, sessionManager) {
         interactable: true,
         tooltipText: '0.25% Trypsin-EDTA — Start enzymatic dissociation [FR-013]',
         type: 'trypsin',
+        temperature: 37.0,
+        validateTemperature: (temp, sm) => {
+            const mgr = sm || sessionManager;
+            return mgr.validateReagentTemperature(temp !== undefined ? temp : trypsinBottle.userData.temperature);
+        },
         onInteract: (obj, ctx) => {
             if (ctx.stateMachine.getCurrentState() !== States.DISSOCIATION) return;
             const sm = ctx.sessionManager;
@@ -510,6 +553,11 @@ export function createLabEnvironment(scene, sessionManager) {
                 sm.showWarning('Complete PBS wash first.');
                 setTimeout(() => sm.clearWarning(), 3000); return;
             }
+
+            // [FR-006] Reagent temperature validation
+            const temp = obj.userData.temperature !== undefined ? obj.userData.temperature : sm.D3.medium_temperature;
+            sm.validateReagentTemperature(temp);
+
             if (!sm.D3.trypsin_applied) {
                 sm.D3.trypsin_applied = true;
                 sm.D3.active_trypsin_volume = 2.5;
@@ -537,6 +585,11 @@ export function createLabEnvironment(scene, sessionManager) {
         interactable: true,
         tooltipText: 'Complete DMEM (serum) — Quench trypsin [FR-015]',
         type: 'dmem',
+        temperature: 37.0,
+        validateTemperature: (temp, sm) => {
+            const mgr = sm || sessionManager;
+            return mgr.validateReagentTemperature(temp !== undefined ? temp : dmemBottle.userData.temperature);
+        },
         onInteract: (obj, ctx) => {
             if (ctx.stateMachine.getCurrentState() !== States.DISSOCIATION) return;
             const sm = ctx.sessionManager;
@@ -544,6 +597,11 @@ export function createLabEnvironment(scene, sessionManager) {
                 sm.showWarning(sm.D3.trypsin_activity_state === 'Neutralized' ? 'Trypsin already neutralized.' : 'Apply trypsin first.');
                 setTimeout(() => sm.clearWarning(), 3000); return;
             }
+
+            // [FR-006] Reagent temperature validation
+            const temp = obj.userData.temperature !== undefined ? obj.userData.temperature : sm.D3.medium_temperature;
+            sm.validateReagentTemperature(temp);
+
             sm.D3.cells_quenched = true;
             sm.D2.quench_media_vol_actual = 7.5;
             sm.D3.flask_medium_level = 7.5 + sm.D3.active_trypsin_volume;
