@@ -65,7 +65,7 @@ export class LabStateMachine {
             if (D2.assessed_confluence_val === null || D2.assessed_confluence_val === undefined) {
                 return { allowed: false, reason: 'Confluency assessment not submitted.' };
             }
-            if (D2.assessed_confluence_val < D1.confluency_threshold) {
+            if (D2.assessed_confluence_val < D1.confluency_threshold && !D2.violation_log.includes('CONFLUENCY_OVERRIDE')) {
                 return { allowed: false, reason: `Confluency ${D2.assessed_confluence_val}% is below 70% threshold. Re-incubation required.` };
             }
             return { allowed: true, reason: '' };
